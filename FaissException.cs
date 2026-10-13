@@ -22,14 +22,10 @@
         /// <param name="statusCode">The integer return code from the native function.</param>
         public static void ThrowIfError(int statusCode)
         {
-            if (statusCode == 0) return; // 0 indicates success
+            if (statusCode == 0) return;
 
-            IntPtr errorPtr = FaissNative.faiss_get_last_error();
-            string errorMessage = errorPtr != IntPtr.Zero
-                ? Marshal.PtrToStringAnsi(errorPtr) ?? "Unknown FAISS error."
-                : "Unknown FAISS error.";
-
-            throw new FaissException($"FAISS Native Error: {errorMessage}");
+            string? errorMessage = FaissNative.GetLastError();
+            throw new FaissException($"FAISS Native Error: {errorMessage ?? "Unknown FAISS error."}");
         }
     }
 

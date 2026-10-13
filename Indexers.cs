@@ -62,20 +62,16 @@ namespace OzzieAI.FaissSharp
     /// </summary>
     public class IndexPQ : FaissIndex
     {
-        /// <summary>
-        /// Initializes a new Product Quantizer index.
-        /// </summary>
-        /// <param name="dimensions">The dimensionality of the indexed vectors.</param>
-        /// <param name="m">The number of sub-vectors to split the original vector into (Dimensions must be a multiple of M).</param>
-        /// <param name="nbits">The number of bits used per sub-vector (usually 8).</param>
-        public IndexPQ(int dimensions, int m, int nbits = 8)
-            : base(Initialize(dimensions, m, nbits), dimensions)
+        public IndexPQ(int dimensions, int m, int nbits = 8, FaissMetricType metric = FaissMetricType.L2)
+            : base(Initialize(dimensions, m, nbits, metric), dimensions)
         {
         }
 
-        private static IntPtr Initialize(int dimensions, int m, int nbits)
+        private static IntPtr Initialize(int dimensions, int m, int nbits, FaissMetricType metric)
         {
-            int status = FaissNative.faiss_IndexPQ_new(out IntPtr ptr, dimensions, m, nbits);
+            // Meta C API constructs PQ indices via the index factory description string
+            string description = nbits == 8 ? $"PQ{m}" : $"PQ{m}x{nbits}";
+            int status = FaissNative.faiss_index_factory(out IntPtr ptr, dimensions, description, (int)metric);
             FaissException.ThrowIfError(status);
             return ptr;
         }

@@ -83,7 +83,7 @@
     /// <summary>
     /// Static utility for migrating indexes between the CPU and GPU.
     /// </summary>
-    public static class FaissGpu
+    public static partial class FaissGpu
     {
         /// <summary>
         /// Clones a CPU index onto the specified GPU, enabling extreme search acceleration.

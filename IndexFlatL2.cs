@@ -352,15 +352,16 @@
         /// <param name="limits">Output array of size (QueryCount + 1). Query 'i' results start at limits[i] and end at limits[i+1].</param>
         /// <param name="distances">Output flat array containing the distances of all matches across all queries.</param>
         /// <param name="labels">Output flat array containing the IDs of all matches across all queries.</param>
+        /// <summary>
+        /// Extracts the flattened labels (IDs) and distances, and returns an array of limits mapping them to each query.
+        /// </summary>
         public void ExtractResults(out long[] limits, out float[] distances, out long[] labels)
         {
             FaissNative.faiss_RangeSearchResult_lims(Handle.DangerousGetHandle(), out IntPtr limsPtr);
 
-            // The limits array defines how many results exist per query. It is always size (QueryCount + 1).
             limits = new long[QueryCount + 1];
             Marshal.Copy(limsPtr, limits, 0, limits.Length);
 
-            // The last element in the limits array dictates the total number of matched neighbors across ALL queries.
             long totalMatches = limits[QueryCount];
 
             distances = new float[totalMatches];
@@ -368,8 +369,8 @@
 
             if (totalMatches > 0)
             {
-                FaissNative.faiss_RangeSearchResult_distances(Handle.DangerousGetHandle(), out IntPtr distPtr);
-                FaissNative.faiss_RangeSearchResult_labels(Handle.DangerousGetHandle(), out IntPtr labelsPtr);
+                // Both labels and distances pointers are extracted simultaneously in Meta's C API
+                FaissNative.faiss_RangeSearchResult_labels(Handle.DangerousGetHandle(), out IntPtr labelsPtr, out IntPtr distPtr);
 
                 Marshal.Copy(distPtr, distances, 0, (int)totalMatches);
                 Marshal.Copy(labelsPtr, labels, 0, (int)totalMatches);
@@ -470,15 +471,15 @@
         /// </summary>
         private static IntPtr Initialize(int dIn, int dOut)
         {
-            int status = FaissNative.faiss_PCAMatrix_new(out IntPtr ptr, dIn, dOut, 0, 0);
-            FaissException.ThrowIfError(status); //[cite: 17]
+            int status = FaissNative.faiss_PCAMatrix_new(out IntPtr ptr, dIn, dOut, 0.0f, 0);
+            FaissException.ThrowIfError(status);
             return ptr;
         }
     }
 
     /// <summary>
-    /// A vector transformation that scales vectors to a specific L2 norm.
-    /// Applying L2 normalization to vectors allows Euclidean (L2) indexes to compute Cosine Similarity.
+    /// A vector transformation that scales vectors to unit length using their L2 norm.
+    /// Normalizing vectors transforms Euclidean (L2) distance into Cosine Similarity.
     /// </summary>
     public class NormalizationTransform : VectorTransform
     {
@@ -486,29 +487,29 @@
         /// Initializes a new L2 normalization transformation.
         /// </summary>
         /// <param name="dimensions">The dimensionality of the vectors being normalized.</param>
-        /// <param name="norm">The target L2 norm to scale to. Defaults to 1.0f (Unit Vector).</param>
-        public NormalizationTransform(int dimensions, float norm = 1.0f)
+        /// <param name="norm">The Lp norm degree. Must be 2.0f (L2 norm) in native FAISS.</param>
+        public NormalizationTransform(int dimensions, float norm = 2.0f)
             : base(Initialize(dimensions, norm)) { }
 
-        /// <summary>
-        /// Invokes the native C API to allocate the Normalization Transform.
-        /// </summary>
         private static IntPtr Initialize(int d, float norm)
         {
             int status = FaissNative.faiss_NormalizationTransform_new(out IntPtr ptr, d, norm);
-            FaissException.ThrowIfError(status); //[cite: 17]
+            FaissException.ThrowIfError(status);
             return ptr;
         }
     }
 
     /// <summary>
     /// A meta-index that applies one or more <see cref="VectorTransform"/> operations to incoming 
-    /// vectors before storing them or searching against a base <see cref="FaissIndex"/>[cite: 18].
+    /// vectors before storing them or searching against a base <see cref="FaissIndex"/>.
     /// </summary>
     public class IndexPreTransform : FaissIndex
     {
         // Maintains a reference to prevent the Garbage Collector from prematurely finalizing the base index.
         private readonly FaissIndex _baseIndex;
+
+        // Keeps managed wrappers alive so the GC never frees their native pointers during garbage collection.
+        private readonly System.Collections.Generic.List<VectorTransform> _transforms = new();
 
         /// <summary>
         /// Initializes a new Pre-Transform pipeline wrapping a target base index.
@@ -521,10 +522,11 @@
 
         private static IntPtr Initialize(FaissIndex baseIndex)
         {
-            if (baseIndex == null || baseIndex.Handle.IsInvalid) throw new ArgumentNullException(nameof(baseIndex));
+            if (baseIndex == null || baseIndex.Handle.IsInvalid)
+                throw new ArgumentNullException(nameof(baseIndex));
 
             int status = FaissNative.faiss_IndexPreTransform_new(out IntPtr ptr, baseIndex.Handle.DangerousGetHandle());
-            FaissException.ThrowIfError(status); //[cite: 17]
+            FaissException.ThrowIfError(status);
             return ptr;
         }
 
@@ -535,14 +537,18 @@
         /// <param name="transform">The transform matrix/operation to apply.</param>
         public void PrependTransform(VectorTransform transform)
         {
-            if (transform == null || transform.Handle.IsInvalid) throw new ArgumentNullException(nameof(transform));
+            if (transform == null || transform.Handle.IsInvalid)
+                throw new ArgumentNullException(nameof(transform));
 
             int status = FaissNative.faiss_IndexPreTransform_prepend_transform(
                 Handle.DangerousGetHandle(),
                 transform.Handle.DangerousGetHandle()
             );
 
-            FaissException.ThrowIfError(status); //[cite: 17]
+            FaissException.ThrowIfError(status);
+
+            // Anchor the transform to keep it alive for the lifetime of this index
+            _transforms.Add(transform);
         }
     }
 
